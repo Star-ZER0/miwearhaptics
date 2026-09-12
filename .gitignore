@@ -1,3 +1,4 @@
 .gradle/
-build/
+/build/
 lib/build/
+debug.log
