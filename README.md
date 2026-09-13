@@ -211,7 +211,7 @@ miwearhaptics/
 │       │   └── HapticConstantsResolver.java
 │       └── resources/META-INF/proguard/proguard-rules.pro
 ├── README.md
-└── AGENT.md                         # 项目维护与协作约定
+└── AGENTS.md                         # 项目维护与协作约定
 ```
 
 本项目未附带 Gradle Wrapper。可使用满足构建要求的本机 Gradle，在本目录运行 `gradle build`；也可以在接入项目的根目录复用其 Wrapper：
@@ -223,4 +223,4 @@ miwearhaptics/
 
 macOS / Linux 使用对应的 `./gradlew`。若应用模块不叫 `app`，请替换任务路径。需要覆盖插件编译使用的 AGP API 版本时，可向命令追加 `-PwearHapticsAgpVersion=<版本号>`。
 
-构建通过可以验证编译和接入过程，实际触觉表现需要在目标设备上确认。维护本项目时请参阅 [AGENT.md](AGENT.md)。
+构建通过可以验证编译和接入过程，实际触觉表现需要在目标设备上确认。维护本项目时请参阅 [AGENTS.md](AGENTS.md)。
