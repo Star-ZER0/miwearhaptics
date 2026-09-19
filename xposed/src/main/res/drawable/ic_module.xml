@@ -1,0 +1,142 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="512dp"
+    android:height="512dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Background -->
+    <path
+        android:fillColor="#0B1220"
+        android:pathData="
+        M0,0
+        H512
+        V512
+        H0
+        Z"/>
+
+
+    <!-- Background accent -->
+    <path
+        android:fillColor="#162B50"
+        android:pathData="
+        M256,96
+        A140,140 0,1 0,256 376
+        A140,140 0,1 0,256 96Z"/>
+
+
+    <!-- Top strap -->
+    <path
+        android:fillColor="#1D4ED8"
+        android:pathData="
+        M214,76
+        H298
+        V156
+        H214
+        Z"/>
+
+
+    <!-- Bottom strap -->
+    <path
+        android:fillColor="#1E3A8A"
+        android:pathData="
+        M214,316
+        H298
+        V436
+        H214
+        Z"/>
+
+
+    <!-- Watch body -->
+    <path
+        android:fillColor="#2563EB"
+        android:pathData="
+        M256,136
+        A100,100 0,1 0,256 336
+        A100,100 0,1 0,256 136Z"/>
+
+
+    <!-- Inner bezel -->
+    <path
+        android:fillColor="#12377F"
+        android:pathData="
+        M256,154
+        A82,82 0,1 0,256 318
+        A82,82 0,1 0,256 154Z"/>
+
+
+    <!-- Screen -->
+    <path
+        android:fillColor="#E8F3FF"
+        android:pathData="
+        M256,168
+        A68,68 0,1 0,256 304
+        A68,68 0,1 0,256 168Z"/>
+
+
+    <!-- Vibration left -->
+    <path
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="
+        M166,220
+        C158,228 158,244 166,252"/>
+
+
+    <!-- Vibration right -->
+    <path
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="
+        M346,220
+        C354,228 354,244 346,252"/>
+
+
+    <!-- Haptic waveform（slightly moved left and downward） -->
+    <path
+        android:strokeColor="#2563EB"
+        android:strokeWidth="12"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="
+    M188,246
+    H202
+    C208,246 210,241 212,232
+    L220,208
+    C223,198 229,198 232,208
+    L242,270
+    C245,282 252,282 255,270
+    L265,196
+    C268,182 276,182 279,196
+    L289,257
+    C292,267 298,267 301,257
+    L316,226
+    C319,217 323,216 325,216"/>
+
+
+    <!-- Compatibility badge -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="
+        M351,303
+        A44,44 0,1 0,351 391
+        A44,44 0,1 0,351 303Z"/>
+
+
+    <!-- Check mark -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="10"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent"
+        android:pathData="
+        M336,347
+        L347,358
+        L367,338"/>
+
+</vector>

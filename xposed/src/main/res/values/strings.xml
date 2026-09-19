@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Mi Wear Haptics</string>
+    <string name="module_description">Prefer Xiaomi Wear scroll haptics, with Google fallback. Requires Modern API 102. Supports JingMatrix LSPatch.</string>
+</resources>

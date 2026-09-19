@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">小米 Wear 触觉兼容</string>
+    <string name="module_description">滚动触觉优先使用小米接口，不可用时回退至 Google。需要 Modern API 102，支持 JingMatrix LSPatch。</string>
+</resources>

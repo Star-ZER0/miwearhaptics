@@ -1,100 +1,145 @@
-# 项目维护指南
+# 项目维护与协作指南
 
-本文件供维护本项目的开发者与自动化协作工具参考。面向使用者的接入说明放在 [README.md](README.md)。修改时以实际源码和用户当前要求为准，保持文档与实现一致。
+本文件适用于整个仓库，供开发者与自动化协作工具使用。面向使用者的接入说明放在 [README.md](README.md)。维护时以实际代码和用户当前要求为准，不把已有文档中的兼容性描述当作测试证据。
 
-## 项目目标
+## 工作原则
 
-`miwearhaptics` 通过 Gradle 构建期字节码转换和运行时适配，为原本调用 Google Wear 触觉常量的 Android 应用提供 Google / 小米兼容能力。
+- 开始修改前查看 `git status --short` 和受影响文件。保留用户已有修改、删除和未跟踪文件，不擅自恢复、覆盖或清理。
+- 先确认改动涉及 Gradle 转换、共享运行时还是 Xposed Hook，尽量保持修改集中。
+- Java 使用四空格缩进，保留现有命名与风格；注释说明兼容原因、缓存和错误处理边界。
+- 不提交构建目录、本机 SDK 路径、签名密钥或设备日志。`xposed/local.properties` 是本机配置。
+- 公开 API、默认策略、支持效果、版本坐标、接入步骤或测试流程变化时，同步对应 README。
 
-维护时保留两个核心体验：
+## 项目组成
 
-1. 已配置 Wear SDK 的宿主项目，通过 `includeBuild("miwearhaptics")` 和应用 `cc.star0.wear.lib.miwearhaptics` 插件即可接入，无需改写原有业务调用。
-2. 默认保持 `GOOGLE_FIRST`：Google 对应接口不可用时回退到小米接口；后续系统更新提供可调用的 Google 接口后，在新的应用进程中优先使用它。
+仓库有两个独立 Gradle 构建，共享同一个 `lib/`：
 
-不要将兼容逻辑改为只识别小米手表 5、只调用小米 SDK，或仅凭厂商字符串和系统版本判断能力。
-
-## 仓库组成
-
-| 路径 | 职责 |
+| 位置 | 职责 |
 | --- | --- |
-| `build.gradle.kts` | 插件 ID、入口类、版本、Java 17 目标、AGP API 与 ASM 依赖 |
-| `settings.gradle.kts` | 仓库配置；将 `lib` 映射为 `:miwearhaptics` 子项目 |
-| `src/main/java/cc/star0/wear/lib/miwearhapticsplugin.java` | 注册 Android 应用/库变体、添加运行时依赖、传递转换参数 |
-| `src/main/java/cc/star0/wear/lib/WearHapticsExtension.java` | `wearHaptics` 配置项及默认值 |
-| `src/main/java/cc/star0/wear/lib/WearHapticsInstrumentation.java` | AGP 转换工厂、类范围过滤和缓存输入 |
-| `src/main/java/cc/star0/wear/lib/WearHapticsClassVisitor.java` | 静态调用、方法句柄和动态常量的重定向及不支持成员检查 |
-| `src/main/java/cc/star0/wear/lib/KotlinCallableReferenceVisitor.java` | Kotlin 函数引用生成类中的 owner 类引用修正 |
-| `lib/build.gradle.kts` | Java 8 运行时库、源码 JAR 和 Maven 发布配置 |
-| `lib/src/main/java/cc/star0/wear/lib/miwearhaptics/WearHapticFeedbackConstantsCompat.java` | 公开兼容 API、效果枚举和策略 |
-| `lib/src/main/java/cc/star0/wear/lib/miwearhaptics/HapticConstantsResolver.java` | 反射解析、回退和按效果缓存 |
-| `lib/src/main/resources/META-INF/proguard/proguard-rules.pro` | 可选 SDK 类及方法的混淆规则 |
+| 根 `build.gradle.kts` / `settings.gradle.kts` | Gradle 插件构建；将 `lib/` 映射为 `:miwearhaptics` |
+| `src/main/java/cc/star0/wear/lib/miwearhapticsplugin.java` | 插件入口、运行时依赖注入、Android 变体注册 |
+| 同目录 `WearHapticsExtension.java` | `wearHaptics` DSL 与默认值 |
+| 同目录 `WearHapticsInstrumentation.java` | AGP 转换工厂、类过滤与缓存输入 |
+| 同目录 `WearHapticsClassVisitor.java` | 调用、方法句柄、动态常量转换与严格检查 |
+| 同目录 `KotlinCallableReferenceVisitor.java` | Kotlin 函数引用中的 owner 类引用修正 |
+| `lib/build.gradle.kts` | Java 8 目标、源码 JAR、名为 `maven` 的运行时发布配置 |
+| `lib/src/main/java/cc/star0/wear/lib/miwearhaptics/` | `WearHapticFeedbackConstantsCompat` 公开 API 与 `HapticConstantsResolver` |
+| `lib/src/main/resources/META-INF/proguard/proguard-rules.pro` | 可选设备 SDK 的混淆规则 |
+| `xposed/build.gradle.kts` / `xposed/settings.gradle.kts` | 独立 Android 模块构建，直接依赖 `../lib/` |
+| `xposed/src/main/java/cc/star0/wear/lib/miwearhaptics/` | `WearHapticsXposed` 入口与 `XiaomiFirstHook` 选择逻辑 |
+| `xposed/src/main/resources/META-INF/xposed/` | Modern Xposed 入口、API 要求和作用域元数据 |
+| `xposed/src/main/AndroidManifest.xml` / `res/` | 无启动组件的模块清单、双语名称和描述、图标 |
+| `xposed/src/test/` | JUnit 回归测试及测试 SDK 桩 |
+
+根构建不包含 `xposed/`。Xposed 构建不加载根目录的字节码转换插件。二者共用 `lib/build/` 输出，验证这两个构建时顺序执行，避免同时写入共享产物。
+
+## 必须区分的行为
+
+- **Gradle 插件 / 公开运行时默认 `GOOGLE_FIRST`**：Google getter 不可用时回退小米。不能为了 Xposed 的需求修改该默认值。
+- **Xposed Hook 固定 `XIAOMI_FIRST`**：小米不可用时调用 Google 原始方法。不能通过修改兼容层全局策略实现 Hook 回退，否则可能再次进入 Hook。
+- 两条路径都按方法实际可调用性判断能力，不按机型、厂商字符串或系统版本选择实现。
+- 成功返回的任意 `int`（包括 `-1`、`0`）都是有效解析结果；只有不可用结果才触发回退。项目不探测马达、反馈强度或常量对应的实际效果。
+- 不可用时返回 `NO_HAPTICS = -1`；可空 API 返回 `null`。不硬编码厂商常量，不用其他振动效果补位。
 
 ## 构建与依赖约定
 
-- 插件 ID 为 `cc.star0.wear.lib.miwearhaptics`，入口类为 `cc.star0.wear.lib.miwearhapticsplugin`。保留现有命名；确需修改入口时同步插件注册。
-- 当前插件与运行时版本均为 `1.0.0`，运行时依赖字符串硬编码在插件入口的 `RUNTIME` 常量中。
-- 当前运行时坐标为 `cc.star0.wear.lib:miwearhaptics:1.0.0`，通过 included build 的依赖替换解析到 `lib`。修改版本、group、子项目名或发布 artifactId 时，检查两个构建脚本、插件依赖字符串、settings 映射和 README 是否仍一致。
-- 接入示例中的 `includeBuild("miwearhaptics")` 放在宿主 `settings.gradle.kts` 顶层，与 `include(":app")` 同级，让该构建同时参与项目插件解析和运行时库依赖替换；仅用于插件管理的引入方式不能替代此处的运行时依赖接入。
-- 插件使用 Java 17；运行时库必须保持 Java 8 源码、字节码和标准库 API 兼容，保留 `options.release.set(8)`。
-- AGP API 是 `compileOnly` 依赖，默认 `9.3.2`，由 `wearHapticsAgpVersion` 项目属性覆盖。当前 ASM / ASM Tree 为 `9.10.1`，JSpecify 为编译期依赖。
-- included build 独立维护仓库与构建依赖，不依赖宿主的版本目录或固定应用包名。
-- 运行时保持纯 Java，不引入 AndroidX、Android 编译依赖或设备 SDK 实现。Google / 小米类通过字符串反射访问。
-- `wear-sdk` 清单声明由宿主应用管理；当前插件不生成或修改 AndroidManifest。
+- 插件 ID：`cc.star0.wear.lib.miwearhaptics`；入口：`cc.star0.wear.lib.miwearhapticsplugin`。保留现有小写入口类名，改名须同步注册。
+- 插件和运行时当前版本均为 `1.0.0`。运行时坐标 `cc.star0.wear.lib:miwearhaptics:1.0.0` 硬编码在插件入口的 `RUNTIME` 中。
+- 修改运行时 group、版本、项目名或 artifactId 时，核对根与 `lib` 构建脚本、`RUNTIME`、两个 settings 中的项目映射和接入文档。
+- 宿主 settings 顶层的 `includeBuild("miwearhaptics")` 同时提供项目插件解析与运行时依赖替换，不能只保留插件管理中的引入。
+- 插件 Java 目标为 17；共享运行时必须保持 Java 8 源码、字节码和标准库 API 兼容，保留 `options.release.set(8)`。
+- 运行时保持纯 Java，不引入 Android / AndroidX 编译依赖或设备 SDK 实现。设备类通过字符串反射访问。
+- 根插件 AGP API 为 `compileOnly`，默认 `9.3.2`，由 `wearHapticsAgpVersion` 覆盖；ASM / ASM Tree 为 `9.10.1`，JSpecify 为编译期依赖。根构建独立维护仓库，不读取宿主版本目录。
+- Xposed 单独固定 AGP `9.3.2`，不受 `wearHapticsAgpVersion` 影响；compileSdk / targetSdk 36、minSdk 26、Java 8 目标，包名 `cc.star0.wear.xposed.miwearhaptics`。
+- Xposed 的 `io.github.libxposed:api:102.0.0` 在正式构建中必须是 `compileOnly`，测试中才使用 `testImplementation`。框架 API 桩不能打包进模块 APK。
+- Xposed Release 启用代码和资源压缩，当前未配置签名。保留入口规则，并核对最终 APK 中的入口名称与元数据。
+- `wear-sdk` 清单声明和设备 SDK 可见性由宿主应用负责，插件与模块均不自动补充。
+- 运行时可用 `gradle :miwearhaptics:publishToMavenLocal` 发布到本机。当前未配置远程 Maven 仓库或插件发布流程，不能将版本坐标描述为已公开发布。
+- Xposed 的 versionName 为 `1.0.0`、versionCode 为 `1`；模块名称和描述分别位于 `values/strings.xml` 与 `values-zh/strings.xml`。调整模块定位、API 要求或名称时同步双语资源与 README。
+- 根构建不需要 Android SDK；Xposed 与宿主 Android 工程各自配置 SDK。Java 8 编译目标不等于运行时已验证所有 Android 版本。
 
 ## 字节码转换约束
 
-- 仅将 `com/google/wear/input/WearHapticFeedbackConstants` 上受支持的静态 `()I` getter 重定向到 `cc/star0/wear/lib/miwearhaptics/WearHapticFeedbackConstantsCompat`。
-- 当前支持 `getScrollItemFocus`、`getScrollTick`、`getScrollLimit`。保持方法名和描述符一致，避免改变调用方的栈行为、装箱逻辑或控制流。
-- 应用模块使用 `InstrumentationScope.ALL`，库模块使用 `InstrumentationScope.PROJECT`。不要假设库模块能够转换其所有外部依赖。
-- 转换配置必须作为 Gradle 输入传入工厂；新增影响转换结果的参数时补充相应 `@Input`，确保缓存失效条件完整。
-- `variants` 为空表示所有变体；包含类前缀为空表示不限制；排除前缀优先；`methods` 为空表示不转换任何 getter。
-- 始终排除 `cc.star0.wear.lib.miwearhaptics.`、`com.google.wear.input.`、`com.xiaomi.miwear.input.`，避免改写解析器和设备 SDK 本身。
-- 默认严格检查不支持的成员访问。关闭 `failOnUnsupportedCalls` 只保留原始访问，不扩展支持范围；已知但未选中的 getter 也保留 Google 调用。
-- 维护方法句柄、`invokedynamic` bootstrap 参数及嵌套 `ConstantDynamic` 的递归处理，不能只覆盖直接调用。
-- Kotlin 函数引用除了调用指令，还可能保存目标 owner 的类字面量。当前仅对直接继承 `FunctionReference`、`FunctionReferenceImpl`、`AdaptedFunctionReference` 的生成类补充处理；只有已适配且没有剩余 Google getter 调用时才改写 owner。
-- 不要全局替换普通类字面量或字符串。业务代码自建的反射调用不在当前自动转换范围内。
+- 只将 `com/google/wear/input/WearHapticFeedbackConstants` 上三个受支持的静态 `()I` getter 重定向到兼容类：`getScrollItemFocus`、`getScrollTick`、`getScrollLimit`。
+- 保持方法名、描述符、栈行为和控制流；应用模块为 `InstrumentationScope.ALL`，库模块为 `InstrumentationScope.PROJECT`。
+- 影响转换结果的参数必须进入工厂的 Gradle `@Input`，保证缓存失效条件完整。
+- `variants` 为空表示全部；包含前缀为空表示不限制；排除前缀优先；`methods` 为空不转换 getter，但不等于关闭严格成员检查。
+- 始终排除 `cc.star0.wear.lib.miwearhaptics.`、`com.google.wear.input.`、`com.xiaomi.miwear.input.`。
+- `enabled=false` 关闭转换，但在 Android 模块注册时仍添加运行时依赖。文档和测试不能把它描述为完全移除插件影响。
+- 注册只监听 `com.android.application` / `com.android.library`。仅将插件应用到非 Android 根项目，不会递归配置子模块。
+- 前缀使用区分大小写的 `startsWith`，变体使用完整名称匹配，不支持通配符。空列表与包含空字符串的列表不同，排除前缀 `""` 会排除全部类。
+- 默认严格检查不支持的成员。宽松模式只保留原访问；已知但未选中的 getter 也保留 Google 调用。
+- 不支持的访问包括字段、构造方法、实例方法及非法 getter 签名；普通调用要求 `INVOKESTATIC` 且非接口，方法句柄要求 `H_INVOKESTATIC` 且非接口。关闭严格检查不应放宽 `methods` 的合法名称校验。
+- 保留方法句柄、`invokedynamic` bootstrap 及嵌套 `ConstantDynamic` 的递归处理，不能只覆盖普通调用。
+- Kotlin owner 修正只针对直接继承 `FunctionReference`、`FunctionReferenceImpl`、`AdaptedFunctionReference` 的生成类，且要求已有适配调用、没有剩余 Google getter 调用。
+- 不全局替换业务反射字符串或普通类字面量；新的字节码形式需单独评估。
+- 严格检查不能发现已内联成普通常量或隐藏在反射字符串中的访问，也不是针对所有类型描述符的完整 Google 引用扫描。不要承诺转换后 Google 类一定可以从整个宿主中移除。
 
-## 运行时行为约束
+## 运行时与 Hook 约束
 
-- 默认全局策略是 `GOOGLE_FIRST`，其余策略为 `XIAOMI_FIRST`、`XIAOMI_ONLY`、`GOOGLE_ONLY` 和 `DISABLED`。带策略参数的调用不修改全局策略。
-- 能力判断基于对应方法能否以无参数静态调用返回 `int`。当前实现接受成功返回的整数，不据此探测马达或触觉强度。
-- 按 SDK 和效果分别缓存成功结果及不可用结果，保持线程安全。不要引入每次 UI 反馈都重复反射的行为。
-- 方法缺失、链接错误及可恢复的反射调用失败应作为该 SDK 效果不可用处理，允许策略继续回退。被调用方法抛出的 `VirtualMachineError` 和 `ThreadDeath` 必须继续传播，避免扩大捕获为吞掉所有 `Throwable`。
-- 无可用效果时，整数 API 返回 `NO_HAPTICS = -1`，可空 API 返回 `null`。不要用其他振动常量、固定厂商编号或自定义振动补位。
-- 策略调整只影响后续常量读取，不会更新调用方已缓存的值；失败解析也会在当前解析器生命周期内缓存。文档不能承诺热切换会使所有已初始化 UI 立即变化。
-- 扩展效果时，至少同步 getter 支持集合、兼容层公开 getter、`Effect` 枚举、混淆规则、相关验证与 README；新接口形式应单独评估字节码规则。
+共享运行时：
 
-## 修改与验证流程
+- 保留五种策略：`GOOGLE_FIRST`、`XIAOMI_FIRST`、`GOOGLE_ONLY`、`XIAOMI_ONLY`、`DISABLED`。带策略参数的调用不修改全局策略。
+- 按 SDK 与效果分别缓存成功值及不可用结果，保持线程安全，避免每次反馈重复反射。
+- 方法缺失、链接错误和可恢复反射失败视为该 SDK 效果不可用；被调用方法抛出的 `VirtualMachineError`、`ThreadDeath` 必须传播，不吞掉所有 `Throwable`。
+- 策略调整不清除解析缓存，不更新调用方已保存的值。文档不能承诺 UI 热切换或系统更新后在旧进程中自动刷新能力。
+- `Effect` / `Policy` 参数均通过 `Objects.requireNonNull` 检查，包括 `DISABLED` 调用；可空 API 的 `null` 仅表示不可用，成功返回 `-1` 仍是非空值。
+- 公开 API 使用兼容类自身的类加载器；不提供注入类加载器、清空缓存或查询实际命中 SDK 的接口。静态策略和解析器属于该类的加载实例，不是跨进程或设备级设置。
+- 解析惰性执行，以 SDK 和效果为键缓存值或不可用状态，没有独立的全局 `Class` / `Method` 查找缓存。保留同步和 `volatile` 策略；`DISABLED` 不触发 SDK 解析。
+- 运行时使用 `Class.forName(..., true, loader)` 和 `getMethod`，查找公开方法并可能初始化类；与 Hook 安装阶段的查找语义不同。
 
-1. 阅读受影响的构建脚本、插件入口和运行时实现，确认改动属于构建期转换还是运行时解析；尽量保持改动集中。
-2. 保持现有 Java 风格：四空格缩进、清晰的类型和方法命名；注释解释兼容原因及边界。
-3. 只改文档时，对照源码核实配置名、默认值、接入路径、版本、支持范围和示例；无需为文档变更增加测试或运行完整 Android 构建。
-4. 修改构建或 Java 代码时，先完成插件与运行时编译，再按影响范围验证调用转换、运行时回退和宿主接入。
-5. 涉及公开 API、默认策略、依赖坐标、接入步骤或兼容范围的变更，同步更新 README；不要宣称未经验证的 AGP 版本、机型或固件已通过测试。
+Xposed 路径：
 
-当前仓库没有 Gradle Wrapper，也没有自动化测试源码或测试依赖。在仓库目录可使用满足要求的本机 Gradle 执行：
+- 使用 Modern API 102 的 `onModuleLoaded` / `onPackageReady` 生命周期，在目标最终类加载器中解析 SDK，不用模块自身类加载器替代。
+- 查找 Google 类时保持 `Class.forName(..., false, loader)`，避免在安装 Hook 前主动初始化 SDK。
+- 使用 `getDeclaredMethod`，仅 Hook Google 类自身声明的公开、静态、非抽象、无参数且返回 `int` 的 getter，不搜索继承方法。Google 类完全不存在时跳过，不宣称可注入缺失 SDK。
+- 跳过模块自身、`android` 包和所有 `system_server` 回调；同一进程的共享 `Method` 不重复 Hook。
+- 小米侧通过 `Policy.XIAOMI_ONLY` 解析；Google 回退必须使用 `Invoker.Type.ORIGIN`，不能改用反射调用已 Hook 的 Google getter 或继续 Hook 链。
+- 保留 `ExceptionMode.PASSTHROUGH`，避免框架保护模式吞掉致命错误。
+- 保留同步、按效果缓存及可重入保护；小米 getter 内再次调用 Google 时直接执行原始 getter。异常后必须恢复递归保护状态。
+- 重入保护属于 `XiaomiFirstHook`，不能据此声称公开运行时也有相同保护。同步监视器保证其他线程不会把一次正在进行的解析误判为同线程递归。
+- 模块不依赖 Root 命令、远程配置或伴随服务；维护时同时考虑兼容 API 102 的 Root 框架与 JingMatrix/LSPatch 内嵌路径。
+- `java_init.list` 指向 `cc.star0.wear.lib.miwearhaptics.WearHapticsXposed`；`module.prop` 当前为 min/target API 102、`staticScope=false`、`autoHotReload=false`；`scope.list` 为空。入口调整须同步元数据和 `xposed/proguard-rules.pro`。
+- 模块与运行时使用相同 Java 包以复用包内 API，但 Android applicationId 不同；不要只改其中一处而破坏访问或自身过滤。
+- 日志通过框架 `log` 接口输出，标签为 `MiWearHaptics`；`Installed N` 只统计本次新增注册，不证明小米 SDK 已解析或触觉有效。共享运行时和 Hook 选择器不记录每次解析/回退日志。
+- 缺失或安装失败的 getter 不受模块保护；`ORIGIN` 会绕过同一方法的 Hook 链。与其他模块或本项目 Gradle 转换叠加时需单独验证，不能把各自的优先级文档当作组合行为保证。
 
-```text
-gradle build
-```
+新增效果时同步检查 `SDK_GETTERS`、公开 getter、`Effect`、混淆规则、两条路径的测试及 README。Xposed 按 `Effect.values()` 注册，新增枚举会直接影响 Hook 范围。
 
-如果仓库位于宿主工程的 `miwearhaptics/`，可以在宿主工程根目录执行：
+## 验证流程
+
+仅修改文档时，对照源码核对配置名、默认值、版本、路径、任务、示例及链接，运行 `git diff --check`；无需因此新增测试或执行完整 Android 构建。
+
+代码变更按影响范围选择以下命令，均从仓库根目录执行。本仓库没有 Gradle Wrapper，命令中的 `gradle` 表示满足相应 AGP 要求的本机安装：
 
 ```powershell
-.\gradlew.bat -p miwearhaptics build
-.\gradlew.bat :app:assembleDebug
+# 插件与共享运行时
+gradle build
+
+# Xposed 及共享运行时相关回归
+gradle -p xposed testDebugUnitTest assembleDebug assembleRelease
 ```
 
-macOS / Linux 使用 `./gradlew`；根据实际模块名替换 `app`。Gradle 和 JDK 版本需满足宿主 AGP 要求，必要时追加 `-PwearHapticsAgpVersion=<版本号>`。不要在本仓库根目录假设存在 `gradlew.bat` 或 Android `assembleDebug` 任务。
+也可从宿主根目录用 `.\gradlew.bat -p miwearhaptics build`，Xposed 使用 `.\gradlew.bat -p miwearhaptics/xposed ...`；macOS / Linux 使用 `./gradlew`。根构建没有 Android `assembleDebug` 任务，`xposed/` 本身就是模块根项目，不使用 `:app:` 前缀。
 
-代码变更时根据受影响行为选择验证场景：
+现有测试与验证边界：
 
-| 改动范围 | 重点验证 |
+| 范围 | 应验证的行为 |
 | --- | --- |
-| 运行时解析与策略 | 仅 Google 可用、仅小米可用、两者均可用、均不可用；默认优先级和显式策略 |
-| 反射与缓存 | 单个效果缺失、getter 抛出异常、部分实现可用、成功与失败缓存、致命错误继续传播 |
-| 字节码转换 | 直接调用、Java 方法引用、Kotlin 函数引用；改动涉及句柄或动态常量时检查对应路径 |
-| 筛选与严格检查 | 变体和类前缀选择、排除优先级、方法子集、空方法集合、未支持成员的严格与宽松行为 |
-| 接入与发布 | included build 的插件解析和运行时依赖替换、应用依赖范围与库模块范围、R8 后反射可用性 |
+| `XiaomiFirstHookTest` | 三效果优先级、回退、缺失/异常/非法签名、成功与失败缓存、类加载器、并发、递归、致命错误、运行时默认策略 |
+| `WearHapticsXposedTest` | Modern API 回调、ORIGIN 调用器、PASSTHROUGH、重复注册、排除进程、Google 类缺失；不模拟 ART Hook |
+| 实际框架验证 | 仓库没有独立 ART 集成测试应用；按需在目标应用与框架中验证小米优先、Google 回退、均不可用、部分可用、小米委托 Google |
+| 根插件转换 | 直接调用、Java 方法引用、Kotlin 函数引用、动态常量、类/变体/方法筛选、严格与宽松行为 |
+| 宿主接入与发布 | included build 插件解析、运行时依赖替换、第三方依赖覆盖、R8 后反射和入口可用性 |
 
-按需要使用有针对性的 JVM 验证或宿主样例，不把编译成功等同于真机触觉验证。交付时简要说明修改内容、实际执行的验证及仍未验证的部分。
+根插件和 `lib/` 当前无独立测试源码；不能将 `gradle build` 描述为完整行为测试。根据代码变更风险补充有针对性的验证，使用宿主构建验证实际接入。
+
+现有 JVM 测试分别为 `XiaomiFirstHookTest` 15 个、`WearHapticsXposedTest` 7 个；修改用例时同步 README 中的数量和覆盖说明。前者用人工 SDK 类及回调测试选择逻辑，后者通过动态代理模拟框架并在测试中调用 `attachFramework`；正式模块不主动调用它。框架适配测试里的反射原始调用不等于真实 ART Hook。
+
+`HapticConstantsResolver` 通过 Xposed 测试被间接覆盖，但公开 API 的全部策略、参数校验和切换场景没有独立完整测试。新增相关行为时补充针对性回归，不能仅依赖现有 Hook 测试。
+
+JUnit HTML 报告位于 `xposed/build/reports/tests/testDebugUnitTest/index.html`，XML 位于 `xposed/build/test-results/testDebugUnitTest/`。可用 `--tests 'cc.star0.wear.lib.miwearhaptics.XiaomiFirstHookTest'` 或对应的 `WearHapticsXposedTest` 筛选用例。报告属于本次执行的证据；已有构建产物或日志不能当作当前修改的验证结果。
+
+人工 Google / 小米 SDK 桩只能留在测试源码中，不能进入正式模块。实际框架验证每个场景使用新进程清除缓存，并记录模块、框架、系统、目标应用和设备号；不将 JVM 测试通过写成 Root 框架或 LSPatch 已验证。
+
+编译、JVM 单元测试、ART Hook 集成测试和真机触觉测试是不同层面的证据。交付时说明实际执行了什么、结果如何，以及尚未验证的部分；不要宣称未经验证的框架版本、机型或固件已兼容。

@@ -1,4 +1,6 @@
 .gradle/
-/build/
-lib/build/
+.idea/
+**/build/
+**/release/
+local.properties
 debug.log
