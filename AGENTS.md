@@ -26,17 +26,17 @@
 | `lib/src/main/java/cc/star0/wear/lib/miwearhaptics/` | `WearHapticFeedbackConstantsCompat` 公开 API 与 `HapticConstantsResolver` |
 | `lib/src/main/resources/META-INF/proguard/proguard-rules.pro` | 可选设备 SDK 的混淆规则 |
 | `xposed/build.gradle.kts` / `xposed/settings.gradle.kts` | 独立 Android 模块构建，直接依赖 `../lib/` |
-| `xposed/src/main/java/cc/star0/wear/lib/miwearhaptics/` | `WearHapticsXposed` 入口与 `XiaomiFirstHook` 选择逻辑 |
+| `xposed/src/main/java/cc/star0/wear/lib/miwearhaptics/` | `WearHapticsXposed` 入口与 `GoogleFirstHook` 选择逻辑 |
 | `xposed/src/main/resources/META-INF/xposed/` | Modern Xposed 入口、API 要求和作用域元数据 |
 | `xposed/src/main/AndroidManifest.xml` / `res/` | 无启动组件的模块清单、双语名称和描述、图标 |
-| `xposed/src/test/` | JUnit 回归测试及测试 SDK 桩 |
+| `xposed/src/fallback/` | Google 缺类兼容入口，单独构建为 DEX 资源 |
 
 根构建不包含 `xposed/`。Xposed 构建不加载根目录的字节码转换插件。二者共用 `lib/build/` 输出，验证这两个构建时顺序执行，避免同时写入共享产物。
 
 ## 必须区分的行为
 
 - **Gradle 插件 / 公开运行时默认 `GOOGLE_FIRST`**：Google getter 不可用时回退小米。不能为了 Xposed 的需求修改该默认值。
-- **Xposed Hook 固定 `XIAOMI_FIRST`**：小米不可用时调用 Google 原始方法。不能通过修改兼容层全局策略实现 Hook 回退，否则可能再次进入 Hook。
+- **Xposed Hook 固定 `GOOGLE_FIRST`**：先调用 Google 原始方法，不可用时解析小米，均不可用时返回 `NO_HAPTICS`。不能通过修改兼容层全局策略实现 Hook 回退，否则可能再次进入 Hook。
 - 两条路径都按方法实际可调用性判断能力，不按机型、厂商字符串或系统版本选择实现。
 - 成功返回的任意 `int`（包括 `-1`、`0`）都是有效解析结果；只有不可用结果才触发回退。项目不探测马达、反馈强度或常量对应的实际效果。
 - 不可用时返回 `NO_HAPTICS = -1`；可空 API 返回 `null`。不硬编码厂商常量，不用其他振动效果补位。
@@ -50,8 +50,8 @@
 - 插件 Java 目标为 17；共享运行时必须保持 Java 8 源码、字节码和标准库 API 兼容，保留 `options.release.set(8)`。
 - 运行时保持纯 Java，不引入 Android / AndroidX 编译依赖或设备 SDK 实现。设备类通过字符串反射访问。
 - 根插件 AGP API 为 `compileOnly`，默认 `9.3.2`，由 `wearHapticsAgpVersion` 覆盖；ASM / ASM Tree 为 `9.10.1`，JSpecify 为编译期依赖。根构建独立维护仓库，不读取宿主版本目录。
-- Xposed 单独固定 AGP `9.3.2`，不受 `wearHapticsAgpVersion` 影响；compileSdk / targetSdk 36、minSdk 26、Java 8 目标，包名 `cc.star0.wear.xposed.miwearhaptics`。
-- Xposed 的 `io.github.libxposed:api:102.0.0` 在正式构建中必须是 `compileOnly`，测试中才使用 `testImplementation`。框架 API 桩不能打包进模块 APK。
+- Xposed 单独固定 AGP `9.3.3`，不受 `wearHapticsAgpVersion` 影响；compileSdk / targetSdk 37、minSdk 26、Java 8 目标，包名 `cc.star0.wear.xposed.miwearhaptics`。
+- Xposed 的 `io.github.libxposed:api:102.0.0` 必须是 `compileOnly`，由框架提供。框架 API 桩不能打包进模块 APK。
 - Xposed Release 启用代码和资源压缩，当前未配置签名。保留入口规则，并核对最终 APK 中的入口名称与元数据。
 - `wear-sdk` 清单声明和设备 SDK 可见性由宿主应用负责，插件与模块均不自动补充。
 - 运行时可用 `gradle :miwearhaptics:publishToMavenLocal` 发布到本机。当前未配置远程 Maven 仓库或插件发布流程，不能将版本坐标描述为已公开发布。
@@ -92,54 +92,46 @@ Xposed 路径：
 
 - 使用 Modern API 102 的 `onModuleLoaded` / `onPackageReady` 生命周期，在目标最终类加载器中解析 SDK，不用模块自身类加载器替代。
 - 查找 Google 类时保持 `Class.forName(..., false, loader)`，避免在安装 Hook 前主动初始化 SDK。
-- 使用 `getDeclaredMethod`，仅 Hook Google 类自身声明的公开、静态、非抽象、无参数且返回 `int` 的 getter，不搜索继承方法。Google 类完全不存在时跳过，不宣称可注入缺失 SDK。
+- 缺类兼容源码在 `xposed/src/fallback/`，单独编译为 `miwearhaptics/classes.dex` 资源，不进入模块主 DEX；通过 `IntUnaryOperator` 回调连接模块与目标加载器。它是三个 getter 的兼容入口，不是设备 SDK 实现。新增效果须同步其编号与入口映射。
+- 补类需要访问 Android 内部 `pathList` / `dexElements`；自定义非 `BaseDexClassLoader` 或框架禁止访问时记录失败，不声称已修复。已发生初始化错误的类不能被补类替换。
+- 使用 `getDeclaredMethod`，仅 Hook Google 类自身声明的公开、静态、非抽象、无参数且返回 `int` 的 getter，不搜索继承方法。Google 类完全不存在时，通过 `MissingGoogleClass` 向目标 `BaseDexClassLoader` 追加只含三个 getter 的兼容 DEX；不覆盖已有类或补充未支持成员。
 - 跳过模块自身、`android` 包和所有 `system_server` 回调；同一进程的共享 `Method` 不重复 Hook。
-- 小米侧通过 `Policy.XIAOMI_ONLY` 解析；Google 回退必须使用 `Invoker.Type.ORIGIN`，不能改用反射调用已 Hook 的 Google getter 或继续 Hook 链。
+- 小米侧通过 `Policy.XIAOMI_ONLY` 解析；Google 优先调用必须使用 `Invoker.Type.ORIGIN`，不能改用反射调用已 Hook 的 Google getter 或继续 Hook 链。
 - 保留 `ExceptionMode.PASSTHROUGH`，避免框架保护模式吞掉致命错误。
-- 保留同步、按效果缓存及可重入保护；小米 getter 内再次调用 Google 时直接执行原始 getter。异常后必须恢复递归保护状态。
-- 重入保护属于 `XiaomiFirstHook`，不能据此声称公开运行时也有相同保护。同步监视器保证其他线程不会把一次正在进行的解析误判为同线程递归。
+- 保留同步、按效果缓存及可重入保护；同一效果重入时复用 Google 缓存，尚未完成或不可用时返回 `NO_HAPTICS`；其他效果独立解析。异常后必须恢复递归保护状态。
+- 重入保护属于 `GoogleFirstHook`，不能据此声称公开运行时也有相同保护。同步监视器保证其他线程不会把一次正在进行的解析误判为同线程递归。
 - 模块不依赖 Root 命令、远程配置或伴随服务；维护时同时考虑兼容 API 102 的 Root 框架与 JingMatrix/LSPatch 内嵌路径。
 - `java_init.list` 指向 `cc.star0.wear.lib.miwearhaptics.WearHapticsXposed`；`module.prop` 当前为 min/target API 102、`staticScope=false`、`autoHotReload=false`；`scope.list` 为空。入口调整须同步元数据和 `xposed/proguard-rules.pro`。
 - 模块与运行时使用相同 Java 包以复用包内 API，但 Android applicationId 不同；不要只改其中一处而破坏访问或自身过滤。
 - 日志通过框架 `log` 接口输出，标签为 `MiWearHaptics`；`Installed N` 只统计本次新增注册，不证明小米 SDK 已解析或触觉有效。共享运行时和 Hook 选择器不记录每次解析/回退日志。
 - 缺失或安装失败的 getter 不受模块保护；`ORIGIN` 会绕过同一方法的 Hook 链。与其他模块或本项目 Gradle 转换叠加时需单独验证，不能把各自的优先级文档当作组合行为保证。
 
-新增效果时同步检查 `SDK_GETTERS`、公开 getter、`Effect`、混淆规则、两条路径的测试及 README。Xposed 按 `Effect.values()` 注册，新增枚举会直接影响 Hook 范围。
+新增效果时同步检查 `SDK_GETTERS`、公开 getter、`Effect`、混淆规则、两条路径的行为及 README。Xposed 按 `Effect.values()` 注册，新增枚举会直接影响 Hook 范围。
 
 ## 验证流程
 
 仅修改文档时，对照源码核对配置名、默认值、版本、路径、任务、示例及链接，运行 `git diff --check`；无需因此新增测试或执行完整 Android 构建。
 
-代码变更按影响范围选择以下命令，均从仓库根目录执行。本仓库没有 Gradle Wrapper，命令中的 `gradle` 表示满足相应 AGP 要求的本机安装：
+代码变更按影响范围选择以下命令，均从仓库根目录执行。本仓库在 `xposed/` 提供 Gradle 9.7.1 Wrapper；命令中的 `gradle` 也可替换为 `.\xposed\gradlew.bat`，用 `-p` 指定构建目录：
 
 ```powershell
 # 插件与共享运行时
 gradle build
 
-# Xposed 及共享运行时相关回归
-gradle -p xposed testDebugUnitTest assembleDebug assembleRelease
+# Xposed Debug 与 Release 构建
+gradle -p xposed assembleDebug assembleRelease
 ```
 
 也可从宿主根目录用 `.\gradlew.bat -p miwearhaptics build`，Xposed 使用 `.\gradlew.bat -p miwearhaptics/xposed ...`；macOS / Linux 使用 `./gradlew`。根构建没有 Android `assembleDebug` 任务，`xposed/` 本身就是模块根项目，不使用 `:app:` 前缀。
 
-现有测试与验证边界：
+当前仓库不保留测试源码、测试依赖或独立冒烟测试脚本。不能将 `gradle build` 或 APK 构建描述为完整行为测试。根据代码变更风险进行有针对性的验证，使用宿主构建验证实际接入。
 
 | 范围 | 应验证的行为 |
 | --- | --- |
-| `XiaomiFirstHookTest` | 三效果优先级、回退、缺失/异常/非法签名、成功与失败缓存、类加载器、并发、递归、致命错误、运行时默认策略 |
-| `WearHapticsXposedTest` | Modern API 回调、ORIGIN 调用器、PASSTHROUGH、重复注册、排除进程、Google 类缺失；不模拟 ART Hook |
-| 实际框架验证 | 仓库没有独立 ART 集成测试应用；按需在目标应用与框架中验证小米优先、Google 回退、均不可用、部分可用、小米委托 Google |
+| Xposed 与缺类兼容 | Google 优先、小米回退、均不可用、部分可用、Google 类缺失、小米委托 Google、重复注册与进程排除 |
 | 根插件转换 | 直接调用、Java 方法引用、Kotlin 函数引用、动态常量、类/变体/方法筛选、严格与宽松行为 |
 | 宿主接入与发布 | included build 插件解析、运行时依赖替换、第三方依赖覆盖、R8 后反射和入口可用性 |
 
-根插件和 `lib/` 当前无独立测试源码；不能将 `gradle build` 描述为完整行为测试。根据代码变更风险补充有针对性的验证，使用宿主构建验证实际接入。
+框架 API 桩和人工 SDK 实现不能进入正式模块。实际框架验证每个场景使用新进程清除缓存，并记录模块、框架、系统、目标应用和设备号。
 
-现有 JVM 测试分别为 `XiaomiFirstHookTest` 15 个、`WearHapticsXposedTest` 7 个；修改用例时同步 README 中的数量和覆盖说明。前者用人工 SDK 类及回调测试选择逻辑，后者通过动态代理模拟框架并在测试中调用 `attachFramework`；正式模块不主动调用它。框架适配测试里的反射原始调用不等于真实 ART Hook。
-
-`HapticConstantsResolver` 通过 Xposed 测试被间接覆盖，但公开 API 的全部策略、参数校验和切换场景没有独立完整测试。新增相关行为时补充针对性回归，不能仅依赖现有 Hook 测试。
-
-JUnit HTML 报告位于 `xposed/build/reports/tests/testDebugUnitTest/index.html`，XML 位于 `xposed/build/test-results/testDebugUnitTest/`。可用 `--tests 'cc.star0.wear.lib.miwearhaptics.XiaomiFirstHookTest'` 或对应的 `WearHapticsXposedTest` 筛选用例。报告属于本次执行的证据；已有构建产物或日志不能当作当前修改的验证结果。
-
-人工 Google / 小米 SDK 桩只能留在测试源码中，不能进入正式模块。实际框架验证每个场景使用新进程清除缓存，并记录模块、框架、系统、目标应用和设备号；不将 JVM 测试通过写成 Root 框架或 LSPatch 已验证。
-
-编译、JVM 单元测试、ART Hook 集成测试和真机触觉测试是不同层面的证据。交付时说明实际执行了什么、结果如何，以及尚未验证的部分；不要宣称未经验证的框架版本、机型或固件已兼容。
+编译、ART Hook 集成验证和真机触觉验证是不同层面的证据。交付时说明实际执行了什么、结果如何，以及尚未验证的部分；不要宣称未经验证的框架版本、机型或固件已兼容。

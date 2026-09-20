@@ -3,6 +3,7 @@ package cc.star0.wear.lib.miwearhaptics;
 import android.util.Log;
 import cc.star0.wear.lib.miwearhaptics.WearHapticFeedbackConstantsCompat.Effect;
 import io.github.libxposed.api.XposedModule;
+import java.io.IOException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.HashSet;
@@ -34,18 +35,29 @@ public final class WearHapticsXposed extends XposedModule {
         }
 
         ClassLoader loader = param.getClassLoader();
+        // The module's own loader does not necessarily see the target's wear-sdk shared library.
+        GoogleFirstHook selection = new GoogleFirstHook(
+                new HapticConstantsResolver(XIAOMI, GOOGLE, loader));
         Class<?> google;
         try {
             // Do not initialize SDK classes until all available getters have been hooked.
             google = Class.forName(GOOGLE, false, loader);
-        } catch (ClassNotFoundException | LinkageError | RuntimeException unavailable) {
-            logPackage(param, "Google class unavailable; no hooks installed");
+        } catch (ClassNotFoundException missing) {
+            try {
+                MissingGoogleClass.install(loader, index -> selection.get(effectAt(index), () -> {
+                    throw new ClassNotFoundException(GOOGLE);
+                }));
+                logPackage(param, "Installed missing Google class fallback (GOOGLE_FIRST)");
+            } catch (ReflectiveOperationException | IOException | LinkageError | RuntimeException failure) {
+                logPackage(param, "Cannot install missing Google class fallback: "
+                        + failure.getClass().getSimpleName());
+            }
+            return;
+        } catch (LinkageError | RuntimeException unavailable) {
+            logPackage(param, "Google class cannot be loaded: " + unavailable.getClass().getSimpleName());
             return;
         }
 
-        // The module's own loader does not necessarily see the target's wear-sdk shared library.
-        XiaomiFirstHook selection = new XiaomiFirstHook(
-                new HapticConstantsResolver(XIAOMI, GOOGLE, loader));
         int installed = 0;
         for (Effect effect : Effect.values()) {
             try {
@@ -79,7 +91,17 @@ public final class WearHapticsXposed extends XposedModule {
             }
         }
         if (installed != 0) {
-            logPackage(param, "Installed " + installed + " getter hooks (XIAOMI_FIRST)");
+            logPackage(param, "Installed " + installed + " getter hooks (GOOGLE_FIRST)");
+        }
+    }
+
+    private static Effect effectAt(int index) {
+        // Explicit mapping matches the isolated fallback dex; enum order is not its ABI.
+        switch (index) {
+            case 0: return Effect.SCROLL_ITEM_FOCUS;
+            case 1: return Effect.SCROLL_TICK;
+            case 2: return Effect.SCROLL_LIMIT;
+            default: throw new IllegalArgumentException("Unknown effect: " + index);
         }
     }
 

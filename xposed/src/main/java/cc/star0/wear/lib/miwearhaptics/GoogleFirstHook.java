@@ -4,41 +4,41 @@ import cc.star0.wear.lib.miwearhaptics.WearHapticFeedbackConstantsCompat.Effect;
 import cc.star0.wear.lib.miwearhaptics.WearHapticFeedbackConstantsCompat.Policy;
 import java.lang.reflect.InvocationTargetException;
 import java.util.EnumMap;
+import java.util.EnumSet;
 
-/** Per target class loader: Xiaomi reflection first, then the unhooked Google getter. */
-final class XiaomiFirstHook {
+/** Per target class loader: unhooked Google getter, Xiaomi reflection, then no haptics. */
+final class GoogleFirstHook {
     interface OriginalGetter {
         int get() throws ReflectiveOperationException;
     }
 
     private final HapticConstantsResolver resolver;
     private final EnumMap<Effect, Integer> google = new EnumMap<>(Effect.class);
-    private boolean resolving;
+    private final EnumSet<Effect> resolving = EnumSet.noneOf(Effect.class);
 
-    XiaomiFirstHook(HapticConstantsResolver resolver) {
+    GoogleFirstHook(HapticConstantsResolver resolver) {
         this.resolver = resolver;
     }
 
-    synchronized int get(Effect effect, OriginalGetter original) throws ReflectiveOperationException {
-        // Some vendor getters delegate back to Google. The monitor is reentrant, so only the
-        // resolving thread can take this branch; bypass Xiaomi to avoid a hook recursion loop.
-        if (resolving) {
-            return original.get();
+    synchronized int get(Effect effect, OriginalGetter original) {
+        // A vendor getter may delegate back to Google after Google has already failed. Reuse
+        // its result (or unavailable state), without recursing into either SDK again.
+        if (!resolving.add(effect)) {
+            Integer value = google.get(effect);
+            return value != null ? value : WearHapticFeedbackConstantsCompat.NO_HAPTICS;
         }
-        resolving = true;
         try {
-            // GOOGLE_FIRST/XIAOMI_FIRST on this resolver would reflect into our own hook.
-            Integer value = resolver.resolve(effect, Policy.XIAOMI_ONLY);
-            if (value != null) {
-                return value;
-            }
             if (!google.containsKey(effect)) {
                 google.put(effect, readOriginal(original));
             }
-            value = google.get(effect);
+            Integer value = google.get(effect);
+            if (value == null) {
+                // Reflecting Google through this resolver would invoke our own hook.
+                value = resolver.resolve(effect, Policy.XIAOMI_ONLY);
+            }
             return value != null ? value : WearHapticFeedbackConstantsCompat.NO_HAPTICS;
         } finally {
-            resolving = false;
+            resolving.remove(effect);
         }
     }
 

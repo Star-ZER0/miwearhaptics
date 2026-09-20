@@ -6,8 +6,8 @@
 
 | 方式 | 适用场景 | 工作方式 | 默认优先级 |
 | --- | --- | --- | --- |
-| Gradle 插件 | 可以重新构建应用 | 构建时将 Google getter 调用重定向到兼容层 | Google → 小米 |
-| Xposed 模块 | 通过支持 Modern API 102 的框架加载模块 | 在目标进程中 Hook Google getter | 小米 → Google 原始方法 |
+| Gradle 插件 | 可以重新构建应用 | 构建时将 Google getter 调用重定向到兼容层 | Google 原始方法 → 小米 → 禁用该效果 |
+| Xposed 模块 | 通过支持 Modern API 102 的框架加载模块 | Hook Google getter；Google 类缺失时补入三个 getter 的兼容入口 | Google 原始方法 → 小米 → 禁用该效果 |
 
 两种方式都只负责获取触觉常量，实际反馈仍由应用的 `View.performHapticFeedback()` 等调用触发。项目由 AI 辅助编写。
 
@@ -232,7 +232,7 @@ Haptics.getOrNull(Haptics.Effect.SCROLL_TICK)
 在仓库根目录执行：
 
 ```powershell
-gradle -p xposed assembleDebug
+.\xposed\gradlew.bat -p xposed assembleDebug
 ```
 
 生成模块 APK：
@@ -246,17 +246,19 @@ xposed/build/outputs/apk/debug/miwearhaptics-xposed-debug.apk
 - **Root 框架**：安装模块 APK，在框架管理器中启用模块并选择目标应用作用域，然后重新启动目标应用进程。
 - **JingMatrix/LSPatch**：使用提供 Modern API 102 的版本及其工具，将模块嵌入目标 APK，再安装修补后的应用。模块更新后需要重新修补、安装并重启目标进程；具体修补参数与签名方式以所用工具版本为准。
 
-模块没有启动界面或策略设置页面，`scope.list` 为空，不预置目标应用。当前固定采用 **小米优先、Google 原始方法回退**；Gradle 插件的 `wearHaptics` 配置和兼容层全局策略不会改变该 Hook 的选择逻辑。模块关闭自动热重载，更新模块或作用域后需重新启动目标进程。
+模块没有启动界面或策略设置页面，`scope.list` 为空，不预置目标应用。当前固定采用 **Google 优先、不可用时回退小米、均不可用时返回 `-1`**，与 Gradle 插件默认策略一致；Gradle 插件的 `wearHaptics` 配置和兼容层全局策略不会改变该 Hook 的选择逻辑。模块关闭自动热重载，更新模块或作用域后需重新启动目标进程。
 
 ### 运行条件与限制
 
-模块在 `onPackageReady` 中通过目标应用的最终类加载器查找 Google 类，并逐个 Hook 可用的公开静态 getter。小米接口不可用时，通过原始方法调用器执行 Google 实现；均不可用时返回 `-1`。成功及失败结果均按效果缓存，并处理小米方法回调 Google 时的递归情况。
+模块在 `onPackageReady` 中通过目标应用的最终类加载器查找 Google 类，并逐个 Hook 可用的公开静态 getter。先通过原始方法调用器执行 Google 实现；方法不可用或发生可恢复调用失败时再解析小米接口；均不可用时返回 `-1`。成功及失败结果均按效果缓存。Google 返回的任何整数（包括 `-1`、`0`）均直接接受，不再调用小米。小米回调同一 Google getter 时复用 Google 缓存，不会反复调用已失败的原方法；尚在递归解析的效果返回 `-1`，其他效果可独立解析。
 
 安装阶段不主动初始化 Google 类。只处理该类自身声明的公开、静态、非抽象、无参数、返回 `int` 的 getter；继承来的同名方法不在当前查找范围内。某个效果缺失、签名不符或 Hook 安装失败时会跳过该效果，继续尝试其他效果。同一模块实例记录已 Hook 的 `Method`，多个包回调解析到同一共享方法时不会重复注册。
 
-小米解析固定使用 `XIAOMI_ONLY`，Google 回退通过 `Invoker.Type.ORIGIN` 执行原始方法，绕过该方法的 Hook 链。模块使用 `ExceptionMode.PASSTHROUGH`，使致命错误可以继续传播。和其他 Hook 模块一起使用时，应单独验证调用顺序与回退行为。
+小米解析固定使用 `XIAOMI_ONLY`，Google 优先调用通过 `Invoker.Type.ORIGIN` 执行原始方法，绕过该方法的 Hook 链。模块使用 `ExceptionMode.PASSTHROUGH`，使致命错误可以继续传播。和其他 Hook 模块一起使用时，应单独验证调用顺序与回退行为。
 
-**目标进程必须能够加载 Google 类和相应 getter，模块才能安装 Hook。** 如果 Google 类完全不存在，模块会跳过，不会注入缺失类或修复类加载失败。需要解决这类调用问题且能重新构建应用时，可使用 Gradle 插件重定向受支持调用。模块也不会为目标应用补充 `wear-sdk` 清单声明或设备实现。
+**Google 类完全缺失时，模块会补入只含上述三个 getter 的兼容类。** 兼容类单独编译为 DEX 资源，借助 `InMemoryDexClassLoader` 将其追加到目标 `BaseDexClassLoader` 的 DEX 路径；原有类保持优先。兼容类通过仅使用 Java 标准类型的回调访问目标加载器的小米接口，均不可用时返回 `-1`，不会引入其他振动效果。它不是 Google 设备 SDK 实现，也不提供未支持的字段或方法。
+
+补类依赖框架允许访问 Android 的 `pathList` / `dexElements` 内部字段。自定义非 `BaseDexClassLoader`、内部字段访问受限、Google 类已因初始化错误损坏，或应用在模块回调前已触发缺类异常的情况仍需单独处理；安装失败会明确记录日志。已有 Google 类只缺部分 getter 时，不能通过补类为它添加方法。模块不会补充 `wear-sdk` 清单声明或设备实现，`-1` 只禁用这些调用对应的效果，不会全局关闭应用震动。
 
 模块跳过自身、`android` 包和 `system_server` 进程。Hook 只影响安装之后实际执行的目标 getter，应用提前缓存的常量不会自动更新；具体框架、固件和应用组合需单独验证。
 
@@ -266,8 +268,10 @@ xposed/build/outputs/apk/debug/miwearhaptics-xposed-debug.apk
 
 | 日志正文 | 含义与检查方向 |
 | --- | --- |
-| `Installed N getter hooks (XIAOMI_FIRST)` | 本次回调新装了 N 个 Hook，最多为 3；不表示已经调用小米 SDK 或验证马达 |
-| `Google class unavailable; no hooks installed` | 最终类加载器无法加载 Google 类，本次回调跳过安装 |
+| `Installed N getter hooks (GOOGLE_FIRST)` | 本次回调新装了 N 个 Hook，最多为 3；不证明 SDK 已解析或验证马达 |
+| `Installed missing Google class fallback (GOOGLE_FIRST)` | 为缺失 Google 类的目标加载器安装了兼容入口；不代表小米接口或马达可用 |
+| `Cannot install missing Google class fallback: <异常类型>` | 补类失败，检查目标加载器类型及框架对 Android 内部字段的访问支持 |
+| `Google class cannot be loaded: <异常类型>` | Google 类加载发生链接或运行时错误，没有用兼容类覆盖它 |
 | `Unsupported signature: <getter>` | 找到了无参数同名方法，但访问修饰符或返回类型不符合要求 |
 | `Cannot hook <getter>: <异常类型>` | 查找或注册该方法失败；只有带参数的重载时也会走此路径 |
 
@@ -281,15 +285,15 @@ xposed/build/outputs/apk/debug/miwearhaptics-xposed-debug.apk
 
 ### 环境与构建命令
 
-本仓库未提供 Gradle Wrapper，需要本机 Gradle，或复用宿主工程的 Wrapper。Gradle 及运行它的 JDK 必须满足所用 AGP 的要求。根目录与 `xposed/` 是两个独立构建，共享 `lib/build/` 输出，应顺序执行，避免同时写入共享产物。
+仓库在 `xposed/` 提供 Gradle Wrapper（9.7.1）；也可使用满足 AGP 要求的本机 Gradle 或宿主 Wrapper。根目录与 `xposed/` 是两个独立构建，共享 `lib/build/` 输出，应顺序执行，避免同时写入共享产物。
 
 | 构建部分 | 当前配置 |
 | --- | --- |
 | 根目录 Gradle 插件 | 版本 `1.0.0`；Java 17；AGP API `9.3.2`（`compileOnly`）；ASM / ASM Tree `9.10.1` |
 | `lib/` 运行时 | 纯 Java，使用 `--release 8`；版本 `1.0.0` |
-| `xposed/` 模块 | versionName `1.0.0` / versionCode `1`；AGP `9.3.2`；Java 8 编译目标；compileSdk / targetSdk 36；minSdk 26 |
+| `xposed/` 模块 | versionName `1.0.0` / versionCode `1`；AGP `9.3.3`；Java 8 编译目标；compileSdk / targetSdk 37；minSdk 26 |
 
-根插件的 AGP API 编译依赖可通过 `-PwearHapticsAgpVersion=<版本号>` 覆盖。该属性不更改宿主 AGP，也不更改 `xposed/` 中的 AGP 版本；覆盖版本后需验证兼容性。Xposed 构建另需 Android SDK Platform 36，通过本机 SDK 环境或 `xposed/local.properties` 配置路径。
+根插件的 AGP API 编译依赖可通过 `-PwearHapticsAgpVersion=<版本号>` 覆盖。该属性不更改宿主 AGP，也不更改 `xposed/` 中的 AGP 版本；覆盖版本后需验证兼容性。Xposed 构建另需 Android SDK Platform 37，通过本机 SDK 环境或 `xposed/local.properties` 配置路径。
 
 根构建独立使用 Google Maven 和 Maven Central，不读取宿主版本目录；Xposed 的插件解析还使用 Gradle Plugin Portal，并禁止在项目脚本中另加依赖仓库。根构建只编译插件和 Java 运行时，不需要本机 Android SDK；宿主 Android 构建与独立 Xposed 构建需要各自可用的 SDK 配置。`lib/` 已由 settings 映射为 `:miwearhaptics`，以下任务通过根目录或 `xposed/` 执行。
 
@@ -299,8 +303,8 @@ xposed/build/outputs/apk/debug/miwearhaptics-xposed-debug.apk
 # 构建 Gradle 插件与 Java 运行时，不包含 Xposed 构建
 gradle build
 
-# Xposed 单元测试、Debug APK 和启用 R8 的 Release APK
-gradle -p xposed testDebugUnitTest assembleDebug assembleRelease
+# Xposed Debug APK 和启用 R8 的 Release APK
+.\xposed\gradlew.bat -p xposed assembleDebug assembleRelease
 ```
 
 如果仓库位于宿主工程的 `miwearhaptics/`，可在宿主根目录执行：
@@ -308,7 +312,7 @@ gradle -p xposed testDebugUnitTest assembleDebug assembleRelease
 ```powershell
 .\gradlew.bat -p miwearhaptics build
 .\gradlew.bat :app:assembleDebug
-.\gradlew.bat -p miwearhaptics/xposed testDebugUnitTest assembleDebug
+.\gradlew.bat -p miwearhaptics/xposed assembleDebug
 ```
 
 macOS / Linux 使用 `./gradlew`，模块名不是 `app` 时替换任务路径。
@@ -335,30 +339,17 @@ gradle :miwearhaptics:publishToMavenLocal
 
 坐标为 `cc.star0.wear.lib:miwearhaptics:1.0.0`。消费本机发布时，需在宿主的依赖仓库中配置 `mavenLocal()`；included build 接入无需此步骤。当前未配置远程发布仓库，文档中的坐标不表示已发布到 Maven Central 或 Gradle Plugin Portal。根插件也没有配置远程插件发布流程。
 
-### 测试覆盖与证据边界
+### 验证范围
 
-| 验证层 | 仓库现有内容 | 能证明的范围 |
-| --- | --- | --- |
-| 插件与运行时构建 | `gradle build` | 编译、打包及 Gradle 插件自身检查；根插件与 `lib/` 没有独立测试源码 |
-| JVM 选择逻辑 | `XiaomiFirstHookTest`，15 个测试 | 三效果、回退、成功/失败缓存、非法小米签名、任意整数、目标类加载器、并发、递归和致命错误传播；兼顾默认策略 |
-| JVM 框架适配 | `WearHapticsXposedTest`，7 个测试 | 使用动态代理模拟框架 API，检查回调、ORIGIN、PASSTHROUGH、重复注册和进程排除；不模拟 ART 拦截 |
-| ART Hook 集成 | 仓库未提供独立集成测试应用或脚本 | 需在实际框架和目标应用中验证拦截、回退及递归行为 |
-| 宿主接入与真机触觉 | 需在目标项目、设备上执行 | included build 解析、第三方调用转换、R8 后反射、具体设备的触觉表现 |
+仓库不保留测试源码和冒烟测试脚本。构建命令验证编译、打包及配置，不等于完整行为测试。Google 优先、小米回退、均不可用、缺类补入及递归行为，应在目标应用和框架中按需验证；实际触觉表现还需在设备上确认。
 
-单元测试不调用马达。现有 JVM 测试对共享运行时的覆盖来自 Hook 路径及少量策略断言，不代表全部公开 API、五种策略组合或切换行为都有独立测试。字节码转换中的 Java/Kotlin 引用、动态常量、过滤和严格检查也需要按改动范围补充验证。
-
-单独运行两个测试类或检查宿主依赖替换时，可使用：
+检查宿主运行时依赖替换时，可在宿主工程根目录执行（按实际模块和变体替换 `app`、`debugRuntimeClasspath`）：
 
 ```powershell
-# 仓库根目录
-gradle -p xposed testDebugUnitTest --tests 'cc.star0.wear.lib.miwearhaptics.XiaomiFirstHookTest'
-gradle -p xposed testDebugUnitTest --tests 'cc.star0.wear.lib.miwearhaptics.WearHapticsXposedTest'
-
-# 宿主工程根目录；按实际模块和变体替换 app、debugRuntimeClasspath
 .\gradlew.bat :app:dependencyInsight --dependency cc.star0.wear.lib:miwearhaptics --configuration debugRuntimeClasspath
 ```
 
-JUnit HTML 报告位于 `xposed/build/reports/tests/testDebugUnitTest/index.html`，XML 结果位于 `xposed/build/test-results/testDebugUnitTest/`。命令和报告路径是复现入口，仓库中的测试源码本身不表示这些验证已经执行或通过。实际框架验证应记录模块版本、框架版本、目标应用、设备系统和运行结果，每轮使用新进程清除缓存影响。
+实际框架验证应记录模块版本、框架版本、目标应用、设备系统和运行结果，每轮使用新进程清除缓存影响。
 
 ## 常见问题
 
@@ -371,7 +362,7 @@ JUnit HTML 报告位于 `xposed/build/reports/tests/testDebugUnitTest/index.html
 | 关闭插件后依赖仍然存在 | `enabled=false` 仅关闭转换；完全移除需删除插件声明及不再需要的运行时接入 |
 | Gradle 接入后没有反馈 | `wear-sdk` 清单声明、转换过滤条件、运行时策略及设备对应方法是否可用 |
 | Google 调用仍未转换 | 是否在正确的 Android 模块启用、变体名是否匹配、包含/排除规则是否过滤调用方、方法是否选中；反射字符串不在转换范围内 |
-| Xposed 日志出现 `Google class unavailable; no hooks installed` | 目标应用最终类加载器看不到 Google 类，当前模块无法为它补类 |
+| Xposed 日志出现 `Google class unavailable; no hooks installed` | 正在运行旧模块；更新模块并重启。LSPatch 内嵌方式须用新模块重新修补目标 APK |
 | Xposed 未生效 | 框架是否提供 API 102、作用域或嵌入方式是否正确、目标进程是否重启；查看 `MiWearHaptics` 日志 |
 | 调整策略或更新系统后效果不变 | 解析结果和调用方常量可能已缓存，重新启动目标应用进程后再验证 |
 | 同时使用 Gradle 插件与 Xposed 时优先级难以判断 | 兼容层反射调用的 Google getter 也可能已被 Hook；优先选择一种接入路径，叠加使用需单独验证 |
@@ -393,7 +384,7 @@ miwearhaptics/
 │   ├── build.gradle.kts      # 独立模块 APK 构建
 │   ├── settings.gradle.kts   # 复用 ../lib
 │   ├── src/main/             # Modern API 102 入口与 Hook
-│   └── src/test/             # JVM 单元测试
+│   └── src/fallback/         # Google 缺类兼容入口（独立 DEX 资源）
 ├── AGENTS.md                 # 维护与协作约定
 └── LICENSE
 ```

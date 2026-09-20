@@ -10,8 +10,8 @@ android {
         applicationId = "cc.star0.wear.xposed.miwearhaptics"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 4
+        versionName = "1.1.1"
     }
 
     compileOptions {
@@ -39,4 +39,45 @@ dependencies {
     implementation(project(":miwearhaptics"))
     // The framework supplies these classes in the target process; never package the API stubs.
     compileOnly("io.github.libxposed:api:102.0.0")
+}
+
+// Keep the compatibility class out of the module's own dex.
+// It is only defined in a target loader after the real Google class was not found.
+val compileGoogleFallback = tasks.register<JavaCompile>("compileGoogleFallback") {
+    source = fileTree("src/fallback/java") { include("**/*.java") }
+    classpath = files()
+    options.release.set(8)
+    destinationDirectory.set(layout.buildDirectory.dir("fallback/classes"))
+}
+val googleFallbackJar = tasks.register<Jar>("googleFallbackJar") {
+    from(compileGoogleFallback)
+    archiveFileName.set("google-fallback.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("fallback"))
+}
+abstract class GoogleFallbackDex : JavaExec() {
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val inputJar: RegularFileProperty
+
+    @TaskAction
+    override fun exec() {
+        val output = outputDirectory.dir("miwearhaptics").get().asFile
+        output.mkdirs()
+        args = listOf("--min-api", "26", "--output", output.absolutePath,
+            inputJar.get().asFile.absolutePath)
+        super.exec()
+    }
+}
+val googleFallbackDex = tasks.register<GoogleFallbackDex>("googleFallbackDex") {
+    val sdk = androidComponents.sdkComponents.sdkDirectory
+    classpath = files(sdk.map { it.file("build-tools/${android.buildToolsVersion}/lib/d8.jar") })
+    mainClass.set("com.android.tools.r8.D8")
+    inputJar.set(googleFallbackJar.flatMap { it.archiveFile })
+    outputDirectory.set(layout.buildDirectory.dir("generated/fallbackResources"))
+}
+androidComponents.onVariants { variant ->
+    variant.sources.resources?.addGeneratedSourceDirectory(googleFallbackDex, GoogleFallbackDex::outputDirectory)
 }
