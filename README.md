@@ -2,6 +2,19 @@
 
 为 Android / Wear 应用提供 Google 与小米 Wear SDK 之间的滚动触觉兼容，面向小米手表 5 / 小米手表 5 eSIM（中国大陆版）等适配场景。是否可用取决于设备实际提供的 SDK 方法，不按机型、厂商字符串或系统版本硬编码判断。
 
+> [!WARNING]
+>
+> ## 本项目即将由新项目取代
+>
+> **`miwearhaptics` 已停止后续迭代，新的开发工作已迁移至 [`cnwearoverlay`](https://github.com/Star-ZER0/cnwearoverlay)。**
+>
+> 如需使用最新版本或获取后续更新，请前往：
+>
+> **[Star-ZER0/cnwearoverlay](https://github.com/Star-ZER0/cnwearoverlay)**
+>
+> 本仓库仅保留用于历史版本、已有项目迁移以及相关参考。迁移流程会在新项目迭代完成后发布于本README。
+
+
 项目提供两种接入方式：
 
 | 方式 | 适用场景 | 工作方式 | 默认优先级 |
