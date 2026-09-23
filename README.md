@@ -14,6 +14,52 @@
 >
 > 本仓库仅保留用于历史版本、已有项目迁移以及相关参考。迁移流程会在新项目迭代完成后发布于本README。
 
+## 迁移至 **[Star-ZER0/cnwearoverlay](https://github.com/Star-ZER0/cnwearoverlay)**
+
+### 1.在项目目录下：
+
+删除miwearhaptics
+
+```bash
+git submodule deinit miwearhaptics
+git rm -f miwearhaptics
+```
+
+新增cnwearoverlay
+
+```bash
+git submodule add https://github.com/Star-ZER0/cnwearoverlay.git cnwearoverlay
+```
+
+### 2.在宿主 `settings.gradle.kts` 中：
+
+将
+
+```kotlin
+includeBuild("miwearhaptics")
+```
+
+改为
+
+```kotlin
+includeBuild("cnwearoverlay")
+```
+
+### 3.在应用模块（通常为 `app/`）的 `build.gradle.kts` 中：
+
+将
+
+```kotlin
+id("cc.star0.wear.lib.miwearhaptics")
+```
+
+改为
+
+```kotlin
+id("cc.star0.wear.lib.cnwearoverlay")
+```
+
+## 接入方式
 
 项目提供两种接入方式：
 
